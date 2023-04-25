@@ -1,66 +1,77 @@
+# Create source archive
+data "archive_file" "lambda_zip" {
+  type             = "zip"
+  source_file      = "${path.module}/../src/lambda_function.py"
+  output_file_mode = "0666"
+  output_path      = "${path.module}/../src.zip"
+}
+
 # Creating Lambda IAM resource
-resource "aws_iam_role" "lambda_iam" {
+resource "aws_iam_role" "lambda_role" {
   name = var.lambda_role_name
 
-  assume_role_policy = <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "lambda.amazonaws.com"
-      },
-      "Action": "sts:AssumeRole"
-    }
-  ]
-}
-EOF
+  assume_role_policy = jsonencode({
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Principal": {
+          "Service": "lambda.amazonaws.com"
+        },
+        "Action": "sts:AssumeRole"
+      }
+    ]
+  })
 }
 
-resource "aws_iam_role_policy" "revoke_keys_role_policy" {
-  name = var.lambda_iam_policy_name
-  role = aws_iam_role.lambda_iam.id
-
-  policy = <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Action": [
-        "s3:*",
-        "ses:*"
-      ],
-      "Effect": "Allow",
-      "Resource": "*"
-    }
-  ]
+resource "aws_cloudwatch_log_group" "loggroup" {
+  name = "/aws/lambda/${aws_lambda_function.etl_sample.function_name}"
+  retention_in_days = 14
 }
-EOF
+
+resource "aws_iam_role_policy_attachment" "lambda_policy_attachment" {
+  role = aws_iam_role.lambda_role.id
+  policy_arn = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_policy_attachment2" {
+  role = aws_iam_role.lambda_role.id
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
 # Creating Lambda resource
-resource "aws_lambda_function" "test_lambda" {
+resource "aws_lambda_function" "etl_sample" {
   function_name    = var.function_name
-  role             = aws_iam_role.lambda_iam.arn
-  handler          = "src/${var.handler_name}.lambda_handler"
+  role             = aws_iam_role.lambda_role.arn
+  handler          = "${var.handler_name}.lambda_handler"
   runtime          = var.runtime
   timeout          = var.timeout
   filename         = "../src.zip"
   source_code_hash = filebase64sha256("../src.zip")
+  layers           = ["arn:aws:lambda:ap-southeast-2:336392948345:layer:AWSSDKPandas-Python39:5"]
   environment {
     variables = {
       env            = var.environment
-      SENDER_EMAIL   = var.sender_email
-      RECEIVER_EMAIL = var.receiver_email
+      DESTINATION_BUCKET   = var.outputs_bucket_name
     }
   }
 }
 
-# Creating s3 resource for invoking to lambda function
-resource "aws_s3_bucket" "bucket" {
-  bucket = var.bucket_name
-  acl    = "private"
+# Creating s3 resources for invoking to lambda function
+resource "aws_s3_bucket" "inputs_bucket" {
+  bucket = var.inputs_bucket_name
+  # acl    = "private"
+  force_destroy = true
+
+  tags = {
+    Environment = var.environment
+  }
+}
+
+resource "aws_s3_bucket" "outputs_bucket" {
+  bucket = var.outputs_bucket_name
+  # acl    = "private"
+  force_destroy = true
 
   tags = {
     Environment = var.environment
@@ -69,17 +80,18 @@ resource "aws_s3_bucket" "bucket" {
 
 # Adding S3 bucket as trigger to my lambda and giving the permissions
 resource "aws_s3_bucket_notification" "aws-lambda-trigger" {
-  bucket = aws_s3_bucket.bucket.id
+  bucket = aws_s3_bucket.inputs_bucket.id
   lambda_function {
-    lambda_function_arn = aws_lambda_function.test_lambda.arn
-    events              = ["s3:ObjectCreated:*", "s3:ObjectRemoved:*"]
+    lambda_function_arn = aws_lambda_function.etl_sample.arn
+    events              = ["s3:ObjectCreated:*"]
 
   }
 }
-resource "aws_lambda_permission" "test" {
+
+resource "aws_lambda_permission" "lambda_invoke_permission" {
   statement_id  = "AllowS3Invoke"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.test_lambda.function_name
+  function_name = aws_lambda_function.etl_sample.function_name
   principal     = "s3.amazonaws.com"
-  source_arn    = "arn:aws:s3:::${aws_s3_bucket.bucket.id}"
+  source_arn    = "arn:aws:s3:::${aws_s3_bucket.inputs_bucket.id}"
 }

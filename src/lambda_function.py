@@ -1,87 +1,94 @@
-import os
 import json
-import boto3
+import os
+import time
+import urllib.parse
 
-SENDER_EMAIL = os.environ["SENDER_EMAIL"]
-RECEIVER_EMAIL = os.environ["RECEIVER_EMAIL"]
-SUBJECT = "S3 Event Notification"
+from contextlib import contextmanager
+from io import BytesIO
+
+import boto3
+import pandas as pd
+
+print('Loading function')
+
+@contextmanager
+def timer(name):
+    start_time = time.time()
+    try:
+        yield
+    finally:
+        print(f'{name} took {time.time()-start_time:.2f}s')
+
+
+DESTINATION_BUCKET = os.environ.get('DESTINATION_BUCKET', 'sst-output') # S3
+DESTINATION_TABLE = os.environ.get('DESTINATION_BUCKET', 'sst-outputs') # DynamoDB
+
+INDEX_COLUMN = 'PassengerId'
+
+s3 = boto3.resource('s3')
+dynamodb = boto3.resource('dynamodb')
+
+def extract(s3_object):
+    s3_bytes = s3_object['Body'].read()
+    return pd.read_csv(BytesIO(s3_bytes), index_col=INDEX_COLUMN)
+
+
+def transform(df):
+    # creating more informative data from raw compund values
+    print('transforming data')
+    df[['CabinDeck', 'CabinNum', 'CabinSide']] = df.Cabin.str.split('/', expand=True)
+    df['GroupId'] = df.index.str.split('_', expand=True).get_level_values(0).astype('int32')
+    df['FamilyName'] = df.Name.str.split(' ', expand=True)[1]
+    return df
+
+
+def load_s3(df, file_name, destination_bucket=DESTINATION_BUCKET):
+    df_bytes = BytesIO()
+    df.to_csv(df_bytes, index_label=INDEX_COLUMN)
+    df_bytes.seek(0)
+    print('trying to write to S3', destination_bucket)
+    bucket = s3.Bucket(destination_bucket)
+    bucket.upload_fileobj(df_bytes, file_name)
+    # s3.upload_fileobj(df_bytes, destination_bucket, file_name)
+
+
+def load_dynamodb(df, file_name, destination_table=DESTINATION_TABLE):
+    # note: just to try it out; writing so many records is actually too expensive
+    # using filename as partition key in table
+    df['filename'] = file_name
+    # need to convert floats to strings
+    records = df.reset_index().astype(str).to_dict(orient='records')
+
+    table = dynamodb.Table(destination_table)
+    print(f'trying to write {len(records)} records to DynamoDB table {destination_table}')
+    with table.batch_writer() as batch:
+        for record in records:
+            batch.put_item(record)
+    # table.put_item(Item={'id': file_name, 'data': json_object})
 
 
 def lambda_handler(event, context):
-    """
-    Lambda Function for Sending Data event
+    #print("Received event: " + json.dumps(event, indent=2))
 
-    Args:
-        event ([type]): Json event
-        context ([type]): [description]
-    """
-    data_response = serialize_event_data(event)
-    send_mail(recipient=SENDER_EMAIL,
-              sender=RECEIVER_EMAIL,
-              subject=SUBJECT,
-              html_body=json.dumps(data_response))
-    
-
-def serialize_event_data(json_data):
-    """
-    Extract data from s3 event
-
-    Args:
-        json_data ([type]): Event JSON Data
-    """
-    bucket = json_data["Records"][0]["s3"]["bucket"]["name"]
-    timestamp = json_data["Records"][0]["eventTime"]
-    s3_key = json_data["Records"][0]["s3"]["object"]["key"]
-    s3_data_size = json_data["Records"][0]["s3"]["object"]["size"]
-    ip_address = json_data["Records"][0]["requestParameters"][
-        "sourceIPAddress"]
-    event_type = json_data["Records"][0]["eventName"]
-    owner_id = json_data["Records"][0]["s3"]["bucket"]["ownerIdentity"][
-        "principalId"]
-    
-    return_json_data = {
-        "event_timestamp": timestamp,
-        "bucket_name": bucket,
-        "object_key": s3_key,
-        "object_size": s3_data_size,
-        "source_ip": ip_address,
-        "event_type": event_type,
-        "owner_identity": owner_id
-    }
-
-    return return_json_data
-
-def send_mail(recipient: str,
-              sender: str,
-              subject: str,
-              html_body: str,
-              encoding: str = "UTF-8"):
-    """
-    Send Email address using the Amazon SES service
-    NOTE: You need to add the sender email in the list of email addresses using the default sandbox environment
-
-    Args:
-        sender (str): Sender email
-        recipient (str): Receiver email
-        subject (str): Email Subject
-        html_body (str): HTML body
-    """
-
-    session = boto3.session.Session()
-    client = session.client('ses')
-
-    response = client.send_email(Destination={'ToAddresses': [recipient]},
-                                 Message={
-                                     'Body': {
-                                         'Html': {
-                                             'Charset': encoding,
-                                             'Data': html_body,
-                                         }
-                                     },
-                                     'Subject': {
-                                         'Charset': encoding,
-                                         'Data': subject,
-                                     },
-                                 },
-                                 Source=sender)
-    return response
+    # Get the object from the event
+    s3_data = event['Records'][0]['s3']
+    bucket_name = s3_data['bucket']['name']
+    key = urllib.parse.unquote_plus(s3_data['object']['key'], encoding='utf-8')
+    try:
+        print(f'trying to load {key} from {bucket_name}')
+        bucket = s3.Bucket(bucket_name)
+        s3_object = bucket.Object(key).get()
+        # s3_object = s3.get_object(Bucket=bucket, Key=key)
+        with timer('extract'):
+            df = extract(s3_object)
+        print(df.head())
+        transformed = transform(df)
+        # write the result
+        load_s3(transformed, key)
+        # load_dynamodb(transformed, key)
+        return True
+    except Exception as e:
+        print(e)
+        print(f'Error getting object {key} from bucket {bucket}. Make sure they exist and your '
+               'bucket is in the same region as this function.')
+        raise e

@@ -1,12 +1,8 @@
 environment            = "dev"
-function_name          = "S3_Notifier"
+function_name          = "etl_sample"
 handler_name           = "lambda_function"
-runtime                = "python3.6"
-timeout                = "900"
-sender_email           = ""
-receiver_email         = ""
-lambda_role_name       = "s3_notifer_lambda_iam_role"
-lambda_iam_policy_name = "s3_notifer_lambda_iam_policy"
-bucket_name            = "s3-notifier-test-bucket-245"
-
-
+runtime                = "python3.9"
+timeout                = "10"
+lambda_role_name       = "etl_sample_lambda_iam_role"
+inputs_bucket_name     = "etl-sample-input"
+outputs_bucket_name    = "etl-sample-output"
