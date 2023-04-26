@@ -11,6 +11,9 @@ variable "runtime" {
 variable "timeout" {
   default = ""
 }
+variable "memory" {
+  default = ""
+}
 
 variable "lambda_role_name" {
   default = ""

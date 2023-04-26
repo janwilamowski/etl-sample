@@ -46,6 +46,7 @@ resource "aws_lambda_function" "etl_sample" {
   handler          = "${var.handler_name}.lambda_handler"
   runtime          = var.runtime
   timeout          = var.timeout
+  memory_size      = var.memory
   filename         = "../src.zip"
   source_code_hash = filebase64sha256("../src.zip")
   layers           = ["arn:aws:lambda:ap-southeast-2:336392948345:layer:AWSSDKPandas-Python39:5"]
