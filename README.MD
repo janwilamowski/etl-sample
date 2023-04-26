@@ -35,7 +35,11 @@ Upload a CSV file:
 ```
 aws s3 cp tests/fixture/test.csv s3://etl-sample-input
 ```
-which will trigger the Lambda processing. After a few moments, you should be able to see the result in the outputs bucket:
+
+or manually on https://s3.console.aws.amazon.com/s3/buckets/etl-sample-input
+which will trigger the Lambda processing. After a few moments, you should be
+able to see the result in the outputs bucket:
+
 ```
 $ aws s3 ls etl-sample-output
 2023-04-25 17:17:11     462360 test.csv
@@ -56,6 +60,8 @@ Trigger the function as S3 would do:
 1. `FUNCTION_ARN=$(terraform -chdir=infra/ output -raw arn)`
 1. `aws lambda invoke --function-name $FUNCTION_ARN --payload file://tests/fixture/s3-put-event.json lambda.out`
 
+or manually on https://console.aws.amazon.com/lambda/home#/functions/etl_sample?tab=testing.
+
 You should see a successful status output:
 ```
 {
@@ -63,7 +69,10 @@ You should see a successful status output:
     "ExecutedVersion": "$LATEST"
 }
 ```
-as well as the return value "true" inside `lambda.out`.
+
+as well as the return value "true" inside `lambda.out`. In the AWS Console,
+you can track the results in CloudWatch which creates separate log streams:
+https://console.aws.amazon.com/cloudwatch/home#logsV2:log-groups/log-group/$252Faws$252Flambda$252Fetl_sample
 
 ## Remove all infrastructure
 
