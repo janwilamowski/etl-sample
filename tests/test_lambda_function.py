@@ -31,12 +31,14 @@ class TestEtlSample(unittest.TestCase):
 
     @patch.object(load_s3, '__defaults__', ('etl-sample-output',))
     @patch('src.lambda_function.s3', s3_mock)
-    @patch('src.lambda_function.extract')
-    def test_pipeline(self, mocked_extract):
-        with open('tests/fixture/event.json') as test_event:
+    @patch('pandas.read_csv')
+    @patch('src.lambda_function.BytesIO')
+    def test_pipeline(self, mocked_bytesio, mocked_readcsv):
+        with open('tests/fixture/s3-put-event.json') as test_event:
             event = json.load(test_event)
-        lambda_handler(event, None)
+        lambda_handler(event, None, False)
 
-        mocked_extract.assert_called_once()
+        mocked_readcsv.assert_called_once()
+        mocked_bytesio.assert_called()
         expected_bucket_calls = [call('etl-sample-input'), call('etl-sample-output')]
         s3_mock.Bucket.assert_has_calls(expected_bucket_calls)

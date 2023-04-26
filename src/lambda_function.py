@@ -12,12 +12,13 @@ import pandas as pd
 print('Loading function')
 
 @contextmanager
-def timer(name):
+def timer(name, log_time):
     start_time = time.time()
     try:
         yield
     finally:
-        print(f'{name} took {time.time()-start_time:.2f}s')
+        if log_time:
+            print(f'{name} took {time.time()-start_time:.3f}s')
 
 
 DESTINATION_BUCKET = os.environ.get('DESTINATION_BUCKET', 'sst-output') # S3
@@ -28,7 +29,12 @@ INDEX_COLUMN = 'PassengerId'
 s3 = boto3.resource('s3')
 dynamodb = boto3.resource('dynamodb')
 
-def extract(s3_object):
+
+def extract(bucket_name, key):
+    print(f'trying to load {key} from {bucket_name}')
+    bucket = s3.Bucket(bucket_name)
+    s3_object = bucket.Object(key).get()
+    # s3_object = s3.get_object(Bucket=bucket_name, Key=key)
     s3_bytes = s3_object['Body'].read()
     return pd.read_csv(BytesIO(s3_bytes), index_col=INDEX_COLUMN)
 
@@ -67,7 +73,7 @@ def load_dynamodb(df, file_name, destination_table=DESTINATION_TABLE):
     # table.put_item(Item={'id': file_name, 'data': json_object})
 
 
-def lambda_handler(event, context):
+def lambda_handler(event, context, log_time=True):
     #print("Received event: " + json.dumps(event, indent=2))
 
     # Get the object from the event
@@ -75,20 +81,18 @@ def lambda_handler(event, context):
     bucket_name = s3_data['bucket']['name']
     key = urllib.parse.unquote_plus(s3_data['object']['key'], encoding='utf-8')
     try:
-        print(f'trying to load {key} from {bucket_name}')
-        bucket = s3.Bucket(bucket_name)
-        s3_object = bucket.Object(key).get()
-        # s3_object = s3.get_object(Bucket=bucket, Key=key)
-        with timer('extract'):
-            df = extract(s3_object)
-        print(df.head())
-        transformed = transform(df)
+        with timer('extracting', log_time):
+            df = extract(bucket_name, key)
+        # print(df.head())
+        with timer('transforming', log_time):
+            transformed = transform(df)
         # write the result
-        load_s3(transformed, key)
+        with timer('loading to S3', log_time):
+            load_s3(transformed, key)
         # load_dynamodb(transformed, key)
         return True
     except Exception as e:
         print(e)
-        print(f'Error getting object {key} from bucket {bucket}. Make sure they exist and your '
+        print(f'Error getting object {key} from bucket {bucket_name}. Make sure they exist and your '
                'bucket is in the same region as this function.')
         raise e
