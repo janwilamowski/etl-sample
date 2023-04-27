@@ -1,4 +1,3 @@
-import json
 import os
 import time
 import urllib.parse
@@ -89,10 +88,9 @@ def lambda_handler(event, context, log_time=True):
         # write the result
         with timer('loading to S3', log_time):
             load_s3(transformed, key)
-        # load_dynamodb(transformed, key)
+            # load_dynamodb(transformed, key)
         return True
     except Exception as e:
         print(e)
-        print(f'Error getting object {key} from bucket {bucket_name}. Make sure they exist and your '
-               'bucket is in the same region as this function.')
+        print(f'Error processing object {key} from bucket {bucket_name}.')
         raise e

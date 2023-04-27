@@ -6,3 +6,4 @@ src.zip
 .terraform/
 .terraform.lock.hcl
 *.tfstate
+.ipynb_checkpoints/

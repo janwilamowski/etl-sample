@@ -7,6 +7,8 @@ another S3 bucket. Terraform is used to manage the cloud infrastructure. The
 data comes from [Kaggle's Spaceship Titanic](https://www.kaggle.com/competitions/spaceship-titanic/)
 competition.
 
+This repo contains the code for my [article series on Medium](https://medium.com/@janwilamowski/setting-up-an-etl-pipeline-on-aws-with-terraform-a54cac416894)
+
 ## Setup project
 
 1. Install conda
